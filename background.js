@@ -1,5 +1,42 @@
 let examWindowId = null;
 
+// --- PENGUNCI VOLUME SISTEM CHROMEOS (100% & ANTI-MUTE) ---
+function kunciVolumeSistem() {
+  try {
+    if (chrome.audio) {
+      // Pastikan output audio tidak dalam kondisi mute
+      chrome.audio.setMute("OUTPUT", false, () => {
+        if (chrome.runtime.lastError) { /* Abaikan jika bukan sesi kiosk */ }
+      });
+
+      // Setel semua speaker/headphone output ke level 100%
+      chrome.audio.getDevices({ streamTypes: ["OUTPUT"] }, (devices) => {
+        if (chrome.runtime.lastError || !devices) return;
+        for (const device of devices) {
+          if (device.level !== 100) {
+            chrome.audio.setProperties(device.id, { level: 100 }, () => {});
+          }
+        }
+      });
+    }
+  } catch (_) {}
+}
+
+// Dengarkan setiap kali volume diubah atau di-mute oleh siswa, lalu kembalikan ke 100%
+if (chrome.audio) {
+  chrome.audio.onLevelChanged.addListener(() => {
+    if (examWindowId !== null) kunciVolumeSistem();
+  });
+
+  chrome.audio.onMuteChanged.addListener((event) => {
+    if (examWindowId !== null && event.isMuted) kunciVolumeSistem();
+  });
+
+  chrome.audio.onDeviceListChanged.addListener(() => {
+    if (examWindowId !== null) kunciVolumeSistem();
+  });
+}
+
 // 1. Atur User-Agent khusus: 10403445@ untuk seluruh request ujian
 chrome.runtime.onInstalled.addListener(() => {
   chrome.declarativeNetRequest.updateDynamicRules({
@@ -27,8 +64,9 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
-// 2. Buka halaman CBT Exam dalam mode Fullscreen Terkunci (Tanpa Resize)
+// 2. Buka halaman CBT Exam dalam mode Fullscreen Terkunci
 chrome.action.onClicked.addListener(() => {
+  kunciVolumeSistem();
   if (examWindowId !== null) {
     chrome.windows.update(examWindowId, { focused: true, state: "fullscreen" }, () => {
       if (chrome.runtime.lastError) {
@@ -51,18 +89,27 @@ function buatJendelaUjian() {
     (win) => {
       if (win) {
         examWindowId = win.id;
+        kunciVolumeSistem();
       }
     }
   );
 }
 
-// 3. PAKSA SELALU DI DEPAN: Jika jendela lain mencoba naik ke depan, tarik kembali CBT Exam ke depan
+// Terima perintah penguncian volume dari exam.js
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg && msg.action === "LOCK_MAX_VOLUME") {
+    kunciVolumeSistem();
+  }
+});
+
+// 3. PAKSA SELALU DI DEPAN
 chrome.windows.onFocusChanged.addListener((focusedWindowId) => {
   if (
     examWindowId !== null &&
     focusedWindowId !== chrome.windows.WINDOW_ID_NONE &&
     focusedWindowId !== examWindowId
   ) {
+    kunciVolumeSistem();
     chrome.windows.update(examWindowId, {
       focused: true,
       state: "fullscreen"
@@ -70,7 +117,7 @@ chrome.windows.onFocusChanged.addListener((focusedWindowId) => {
   }
 });
 
-// 4. CEGAH RESIZE / MINIMIZE: Kembalikan otomatis ke Fullscreen jika ukuran jendela berubah
+// 4. CEGAH RESIZE / MINIMIZE
 chrome.windows.onBoundsChanged.addListener((win) => {
   if (examWindowId !== null && win.id === examWindowId && win.state !== "fullscreen") {
     chrome.windows.update(examWindowId, {
@@ -80,7 +127,6 @@ chrome.windows.onBoundsChanged.addListener((win) => {
   }
 });
 
-// Reset ID jendela jika ditutup resmi oleh pengawas (password xyz)
 chrome.windows.onRemoved.addListener((closedWindowId) => {
   if (closedWindowId === examWindowId) {
     examWindowId = null;
