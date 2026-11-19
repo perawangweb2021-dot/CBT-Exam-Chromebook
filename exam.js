@@ -66,7 +66,7 @@ const modalInputLink = document.getElementById("modalInputLink");
 const inputExamUrl = document.getElementById("inputExamUrl");
 
 document.getElementById("btnMenuInputLink").addEventListener("click", () => {
-  inputExamUrl.value = ""; // Selalu kosongkan history ketikan
+  inputExamUrl.value = "";
   modalInputLink.classList.remove("hidden");
   inputExamUrl.focus();
 });
@@ -78,7 +78,7 @@ document.getElementById("btnCancelLink").addEventListener("click", () => {
 
 document.getElementById("btnSubmitLink").addEventListener("click", () => {
   let url = inputExamUrl.value.trim();
-  inputExamUrl.value = ""; // Hapus ketikan setelah disubmit
+  inputExamUrl.value = "";
   if (!url) return alert("Link ujian tidak boleh kosong!");
   if (!url.startsWith("http://") && !url.startsWith("https://")) {
     url = "https://" + url;
@@ -87,7 +87,6 @@ document.getElementById("btnSubmitLink").addEventListener("click", () => {
   mulaiUjian(url);
 });
 
-// Bantuan
 const modalBantuan = document.getElementById("modalBantuan");
 document.getElementById("btnMenuBantuan").addEventListener("click", () => {
   modalBantuan.classList.remove("hidden");
@@ -96,7 +95,7 @@ document.getElementById("btnCloseBantuan").addEventListener("click", () => {
   modalBantuan.classList.add("hidden");
 });
 
-// --- 4. SCAN QR CODE UJIAN (MENGGUNAKAN BARCODEDETECTOR CHROMEOS) ---
+// --- 4. SCAN QR CODE UJIAN ---
 const modalScanQr = document.getElementById("modalScanQr");
 const qrVideo = document.getElementById("qrScannerVideo");
 const qrStatus = document.getElementById("qrStatus");
@@ -150,14 +149,8 @@ async function mulaiUjian(url) {
   document.getElementById("examScreen").classList.add("active");
   document.getElementById("examFrame").src = url;
 
-  // Masuk mode layar penuh (Fullscreen)
-  try {
-    if (!document.fullscreenElement) {
-      await document.documentElement.requestFullscreen();
-    }
-  } catch (_) {}
+  paksaLayarPenuhDanDepan();
 
-  // Aktifkan Live Kamera Depan Pengawas
   try {
     frontStream = await navigator.mediaDevices.getUserMedia({
       video: { width: 320, height: 240, facingMode: "user" },
@@ -167,6 +160,23 @@ async function mulaiUjian(url) {
   } catch (e) {
     document.getElementById("cameraWidget").style.display = "none";
   }
+}
+
+async function paksaLayarPenuhDanDepan() {
+  if (isAuthorizedExit) return;
+  try {
+    window.focus();
+    if (!document.fullscreenElement) {
+      await document.documentElement.requestFullscreen();
+    }
+    if (chrome && chrome.windows) {
+      chrome.windows.getCurrent((win) => {
+        if (win) {
+          chrome.windows.update(win.id, { focused: true, state: "fullscreen" });
+        }
+      });
+    }
+  } catch (_) {}
 }
 
 // --- 6. KONTROL REFRESH, ZOOM & KELUAR (PASSWORD: xyz) ---
@@ -225,7 +235,7 @@ document.getElementById("btnConfirmExit").addEventListener("click", () => {
   }
 });
 
-// --- 7. PROTEKSI ANTI KLIK KANAN, ANTI-COPY & DETEKSI PINDAH JENDELA ---
+// --- 7. PROTEKSI ANTI KLIK KANAN, ANTI-RESIZE & SELALU DI DEPAN ---
 document.addEventListener("contextmenu", (e) => {
   e.preventDefault();
   e.stopPropagation();
@@ -246,16 +256,17 @@ document.addEventListener("cut", (e) => e.preventDefault());
 document.addEventListener("keydown", (e) => {
   if (!isExamActive || isAuthorizedExit) return;
 
-  // Blokir tombol ContextMenu, fungsi, PrintScreen, Ctrl+C/V/U/I/N/T/W/R, Alt, Meta
+  // Blokir seluruh tombol sistem, resize (Alt+[, Alt+], F11, F4), dan shortcut keluar
   if (
     e.key === "ContextMenu" ||
     e.key === "PrintScreen" ||
     e.key === "Escape" ||
+    e.key === "F4" ||
     e.key === "F11" ||
     e.key === "F12" ||
     e.metaKey ||
     e.altKey ||
-    (e.ctrlKey && ["c", "v", "x", "u", "s", "p", "n", "t", "w", "r"].includes(e.key.toLowerCase()))
+    (e.ctrlKey && ["c", "v", "x", "u", "s", "p", "n", "t", "w", "r", "-", "+", "="].includes(e.key.toLowerCase()))
   ) {
     e.preventDefault();
     bunyikanAlarm();
@@ -266,16 +277,27 @@ function tampilkanPelanggaran() {
   if (!isExamActive || isAuthorizedExit) return;
   bunyikanAlarm();
   document.getElementById("violationOverlay").classList.remove("hidden");
+  paksaLayarPenuhDanDepan();
 }
 
-// 1. Deteksi jika tab/jendela disembunyikan atau pindah aplikasi
+// 1. Cegah Resize Layar (Jika ukuran jendela mengecil dari resolusi layar penuh)
+window.addEventListener("resize", () => {
+  if (!isExamActive || isAuthorizedExit) return;
+  const isNotFullWidth = window.outerWidth < screen.availWidth - 10;
+  const isNotFullHeight = window.outerHeight < screen.availHeight - 10;
+  if (isNotFullWidth || isNotFullHeight) {
+    tampilkanPelanggaran();
+  }
+});
+
+// 2. Deteksi jika tab/jendela disembunyikan atau pindah aplikasi
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
     tampilkanPelanggaran();
   }
 });
 
-// 2. Deteksi jika window kehilangan fokus (ABAIKAN jika fokus pindah ke dalam iframe soal/login)
+// 3. Deteksi jika window kehilangan fokus (ABAIKAN jika fokus pindah ke dalam iframe soal/login)
 window.addEventListener("blur", () => {
   if (!isExamActive || isAuthorizedExit) return;
 
@@ -283,30 +305,33 @@ window.addEventListener("blur", () => {
     const activeEl = document.activeElement;
     const examFrame = document.getElementById("examFrame");
 
-    // Jika siswa mengklik kolom login/jawaban di dalam iframe soal, JANGAN anggap pelanggaran
     if (activeEl === examFrame || (activeEl && activeEl.tagName === "IFRAME")) {
       return;
     }
 
-    // Jika dokumen benar-benar kehilangan fokus ke jendela/aplikasi luar
     if (!document.hasFocus()) {
       tampilkanPelanggaran();
     }
   }, 150);
 });
 
-// 3. Deteksi jika siswa keluar dari mode layar penuh (Fullscreen)
+// 4. Deteksi jika siswa keluar dari mode layar penuh (Fullscreen)
 document.addEventListener("fullscreenchange", () => {
   if (isExamActive && !isAuthorizedExit && !document.fullscreenElement) {
     tampilkanPelanggaran();
   }
 });
 
+// 5. Penjaga berkala (setiap 700ms) memastikan jendela tetap di depan & fullscreen
+setInterval(() => {
+  if (!isAuthorizedExit && document.visibilityState === "visible") {
+    if (!document.fullscreenElement && isExamActive) {
+      paksaLayarPenuhDanDepan();
+    }
+  }
+}, 700);
+
 document.getElementById("btnResumeFullscreen").addEventListener("click", async () => {
   document.getElementById("violationOverlay").classList.add("hidden");
-  try {
-    if (!document.fullscreenElement) {
-      await document.documentElement.requestFullscreen();
-    }
-  } catch (_) {}
+  await paksaLayarPenuhDanDepan();
 });
