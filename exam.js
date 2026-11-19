@@ -4,21 +4,39 @@ let currentZoom = 1.0;
 let frontStream = null;
 let qrStream = null;
 let qrScanInterval = null;
+let sharedAudioCtx = null;
 
-// --- 1. PENGUNCI VOLUME MAKSIMAL (100% & ANTI-MUTE) ---
+// --- 1. INISIALISASI & PENGUNCI VOLUME MAKSIMAL ---
+function aktifkanAudioContext() {
+  try {
+    if (!sharedAudioCtx) {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      sharedAudioCtx = new AudioCtx();
+    }
+    if (sharedAudioCtx.state === "suspended") {
+      sharedAudioCtx.resume();
+    }
+  } catch (_) {}
+}
+
 function paksaVolumeMaksimal() {
   if (isAuthorizedExit) return;
 
-  // A. Kunci Volume Sistem ChromeOS (Aktif pada Mode Kiosk / Managed Chromebook)
+  // 1. Kirim perintah ke background.js untuk mengunci hardware volume Chromebook ke 100%
+  try {
+    if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
+      chrome.runtime.sendMessage({ action: "LOCK_MAX_VOLUME" }).catch(() => {});
+    }
+  } catch (_) {}
+
+  // 2. Paksa langsung dari sisi halaman jika API tersedia
   try {
     if (typeof chrome !== "undefined" && chrome.audio) {
+      chrome.audio.setMute("OUTPUT", false, () => {});
       chrome.audio.getDevices({ streamTypes: ["OUTPUT"] }, (devices) => {
         if (chrome.runtime.lastError || !devices) return;
         devices.forEach((dev) => {
-          if (dev.isMuted) {
-            chrome.audio.setMute("OUTPUT", false, () => {});
-          }
-          if (dev.level < 100) {
+          if (dev.level !== 100) {
             chrome.audio.setProperties(dev.id, { level: 100 }, () => {});
           }
         });
@@ -26,7 +44,7 @@ function paksaVolumeMaksimal() {
     }
   } catch (_) {}
 
-  // B. Pastikan seluruh elemen audio/video di halaman tidak di-mute dan volume = 1.0 (100%)
+  // 3. Kunci seluruh elemen audio/video halaman pada volume 1.0 (100%)
   try {
     document.querySelectorAll("audio, video").forEach((el) => {
       if (el.id !== "frontCameraVideo" && el.id !== "qrScannerVideo") {
@@ -37,61 +55,49 @@ function paksaVolumeMaksimal() {
   } catch (_) {}
 }
 
-// Pantau perubahan volume/mute sistem secara real-time dan kunci kembali ke 100%
-try {
-  if (typeof chrome !== "undefined" && chrome.audio) {
-    chrome.audio.onLevelChanged.addListener(() => {
-      if (!isAuthorizedExit) {
-        paksaVolumeMaksimal();
-        if (isExamActive) bunyikanAlarm();
-      }
-    });
-    chrome.audio.onMuteChanged.addListener((evt) => {
-      if (!isAuthorizedExit && evt.isMuted) {
-        paksaVolumeMaksimal();
-        if (isExamActive) bunyikanAlarm();
-      }
-    });
-  }
-} catch (_) {}
+// Buka kunci audio pada setiap interaksi klik/sentuhan pertama siswa
+document.addEventListener("click", () => {
+  aktifkanAudioContext();
+  paksaVolumeMaksimal();
+}, true);
 
-// Pengecekan berkala setiap 500ms agar volume selalu terkunci 100%
+// Interval pengunci volume setiap 400ms
 setInterval(() => {
   if (!isAuthorizedExit) {
     paksaVolumeMaksimal();
   }
-}, 500);
+}, 400);
 
 // --- 2. GENERATOR ALARM PERINGATAN (VOLUME MAKSIMAL + PENGUAT GAIN) ---
 function bunyikanAlarm() {
+  aktifkanAudioContext();
   paksaVolumeMaksimal();
   try {
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    const ctx = new AudioCtx();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    const compressor = ctx.createDynamicsCompressor();
+    if (!sharedAudioCtx) return;
+    const now = sharedAudioCtx.currentTime;
+    const osc = sharedAudioCtx.createOscillator();
+    const gain = sharedAudioCtx.createGain();
+    const compressor = sharedAudioCtx.createDynamicsCompressor();
 
     osc.type = "sawtooth";
-    osc.frequency.setValueAtTime(920, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(480, ctx.currentTime + 0.35);
-    osc.frequency.exponentialRampToValueAtTime(980, ctx.currentTime + 0.7);
-    osc.frequency.exponentialRampToValueAtTime(520, ctx.currentTime + 1.0);
+    osc.frequency.setValueAtTime(920, now);
+    osc.frequency.exponentialRampToValueAtTime(480, now + 0.35);
+    osc.frequency.exponentialRampToValueAtTime(980, now + 0.7);
+    osc.frequency.exponentialRampToValueAtTime(520, now + 1.0);
 
-    // Penguat suara maksimal dengan limiter agar tetap nyaring dan jelas
-    gain.gain.setValueAtTime(3.0, ctx.currentTime);
+    // Penguat suara maksimal
+    gain.gain.setValueAtTime(3.0, now);
     osc.connect(gain);
     gain.connect(compressor);
-    compressor.connect(ctx.destination);
+    compressor.connect(sharedAudioCtx.destination);
 
-    osc.start();
-    osc.stop(ctx.currentTime + 1.1);
+    osc.start(now);
+    osc.stop(now + 1.05);
   } catch (e) {
     console.warn("Audio alarm gagal diputar:", e);
   }
 }
 
-// Jalankan penguncian volume segera saat halaman dimuat
 paksaVolumeMaksimal();
 
 // --- 3. INDIKATOR JAM, BATERAI & JARINGAN ---
@@ -131,6 +137,7 @@ const modalInputLink = document.getElementById("modalInputLink");
 const inputExamUrl = document.getElementById("inputExamUrl");
 
 document.getElementById("btnMenuInputLink").addEventListener("click", () => {
+  aktifkanAudioContext();
   paksaVolumeMaksimal();
   inputExamUrl.value = "";
   modalInputLink.classList.remove("hidden");
@@ -167,6 +174,7 @@ const qrVideo = document.getElementById("qrScannerVideo");
 const qrStatus = document.getElementById("qrStatus");
 
 document.getElementById("btnMenuScanQr").addEventListener("click", async () => {
+  aktifkanAudioContext();
   paksaVolumeMaksimal();
   modalScanQr.classList.remove("hidden");
   qrStatus.textContent = "Membuka kamera Chromebook...";
@@ -212,6 +220,7 @@ document.getElementById("btnCancelQr").addEventListener("click", () => {
 // --- 6. MEMULAI HALAMAN UJIAN & KAMERA PENGAWAS ---
 async function mulaiUjian(url) {
   isExamActive = true;
+  aktifkanAudioContext();
   paksaVolumeMaksimal();
   document.getElementById("homeScreen").classList.remove("active");
   document.getElementById("examScreen").classList.add("active");
@@ -325,7 +334,6 @@ document.addEventListener("cut", (e) => e.preventDefault());
 document.addEventListener("keydown", (e) => {
   if (!isExamActive || isAuthorizedExit) return;
 
-  // Blokir tombol Volume Down, Mute (F8/F9 Chromebook), ContextMenu, Resize & Shortcut sistem
   if (
     e.key === "AudioVolumeDown" ||
     e.key === "AudioVolumeMute" ||
@@ -357,7 +365,6 @@ function tampilkanPelanggaran() {
   paksaLayarPenuhDanDepan();
 }
 
-// 1. Cegah Resize Layar
 window.addEventListener("resize", () => {
   if (!isExamActive || isAuthorizedExit) return;
   const isNotFullWidth = window.outerWidth < screen.availWidth - 10;
@@ -367,14 +374,12 @@ window.addEventListener("resize", () => {
   }
 });
 
-// 2. Deteksi jika tab/jendela disembunyikan atau pindah aplikasi
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
     tampilkanPelanggaran();
   }
 });
 
-// 3. Deteksi jika window kehilangan fokus (ABAIKAN jika fokus pindah ke dalam iframe soal/login)
 window.addEventListener("blur", () => {
   if (!isExamActive || isAuthorizedExit) return;
 
@@ -392,14 +397,12 @@ window.addEventListener("blur", () => {
   }, 150);
 });
 
-// 4. Deteksi jika siswa keluar dari mode layar penuh (Fullscreen)
 document.addEventListener("fullscreenchange", () => {
   if (isExamActive && !isAuthorizedExit && !document.fullscreenElement) {
     tampilkanPelanggaran();
   }
 });
 
-// 5. Penjaga berkala (setiap 700ms) memastikan jendela tetap di depan & fullscreen
 setInterval(() => {
   if (!isAuthorizedExit && document.visibilityState === "visible") {
     if (!document.fullscreenElement && isExamActive) {
