@@ -225,16 +225,30 @@ document.getElementById("btnConfirmExit").addEventListener("click", () => {
   }
 });
 
-// --- 7. PROTEKSI ANTI-COPY, ANTI-SCREENSHOT & DETEKSI PINDAH JENDELA (FIXED IFRAME FOCUS) ---
-document.addEventListener("contextmenu", (e) => e.preventDefault());
+// --- 7. PROTEKSI ANTI KLIK KANAN, ANTI-COPY & DETEKSI PINDAH JENDELA ---
+document.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  return false;
+}, true);
+
+document.addEventListener("mousedown", (e) => {
+  if (e.button === 2) {
+    e.preventDefault();
+    e.stopPropagation();
+    bunyikanAlarm();
+  }
+}, true);
+
 document.addEventListener("copy", (e) => e.preventDefault());
 document.addEventListener("cut", (e) => e.preventDefault());
 
 document.addEventListener("keydown", (e) => {
   if (!isExamActive || isAuthorizedExit) return;
 
-  // Blokir tombol fungsi, PrintScreen, Ctrl+C/V/U/I/N/T/W/R, Alt, Meta (tombol Search Chromebook)
+  // Blokir tombol ContextMenu, fungsi, PrintScreen, Ctrl+C/V/U/I/N/T/W/R, Alt, Meta
   if (
+    e.key === "ContextMenu" ||
     e.key === "PrintScreen" ||
     e.key === "Escape" ||
     e.key === "F11" ||
