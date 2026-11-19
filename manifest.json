@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "CBT EXAM BROWSER - SMPN 1 TUALANG",
   "short_name": "CBT Exam",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "CBT Exam Browser SMP Negeri 1 Tualang untuk Chromebook Pendidikan (Mode Kiosk & Pengawas).",
   "icons": {
     "16": "icons/logo.png",
@@ -28,7 +28,8 @@
     "declarativeNetRequest",
     "storage",
     "system.display",
-    "power"
+    "power",
+    "audio"
   ],
   "host_permissions": [
     "<all_urls>"
