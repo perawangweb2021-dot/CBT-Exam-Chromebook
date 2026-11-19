@@ -18,7 +18,7 @@ function bunyikanAlarm() {
     osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.4);
     osc.frequency.exponentialRampToValueAtTime(920, ctx.currentTime + 0.8);
 
-    gain.gain.setValueAtTime(1.0, ctx.currentTime); // Volume maksimal
+    gain.gain.setValueAtTime(1.0, ctx.currentTime);
     osc.connect(gain);
     gain.connect(ctx.destination);
 
@@ -78,7 +78,7 @@ document.getElementById("btnCancelLink").addEventListener("click", () => {
 
 document.getElementById("btnSubmitLink").addEventListener("click", () => {
   let url = inputExamUrl.value.trim();
-  inputExamUrl.value = ""; // Hapus ketikan
+  inputExamUrl.value = ""; // Hapus ketikan setelah disubmit
   if (!url) return alert("Link ujian tidak boleh kosong!");
   if (!url.startsWith("http://") && !url.startsWith("https://")) {
     url = "https://" + url;
@@ -225,7 +225,7 @@ document.getElementById("btnConfirmExit").addEventListener("click", () => {
   }
 });
 
-// --- 7. PROTEKSI ANTI-COPY, ANTI-SCREENSHOT & DETEKSI PINDAH JENDELA ---
+// --- 7. PROTEKSI ANTI-COPY, ANTI-SCREENSHOT & DETEKSI PINDAH JENDELA (FIXED IFRAME FOCUS) ---
 document.addEventListener("contextmenu", (e) => e.preventDefault());
 document.addEventListener("copy", (e) => e.preventDefault());
 document.addEventListener("cut", (e) => e.preventDefault());
@@ -233,7 +233,7 @@ document.addEventListener("cut", (e) => e.preventDefault());
 document.addEventListener("keydown", (e) => {
   if (!isExamActive || isAuthorizedExit) return;
 
-  // Blokir tombol fungsi, PrintScreen, Ctrl+C/V/U/I/N/T/W, Alt, Meta (tombol Search Chromebook)
+  // Blokir tombol fungsi, PrintScreen, Ctrl+C/V/U/I/N/T/W/R, Alt, Meta (tombol Search Chromebook)
   if (
     e.key === "PrintScreen" ||
     e.key === "Escape" ||
@@ -248,24 +248,51 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-// Deteksi jika siswa keluar fullscreen atau berpindah aplikasi/jendela
-window.addEventListener("blur", () => {
-  if (isExamActive && !isAuthorizedExit) {
-    bunyikanAlarm();
-    document.getElementById("violationOverlay").classList.remove("hidden");
+function tampilkanPelanggaran() {
+  if (!isExamActive || isAuthorizedExit) return;
+  bunyikanAlarm();
+  document.getElementById("violationOverlay").classList.remove("hidden");
+}
+
+// 1. Deteksi jika tab/jendela disembunyikan atau pindah aplikasi
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    tampilkanPelanggaran();
   }
 });
 
+// 2. Deteksi jika window kehilangan fokus (ABAIKAN jika fokus pindah ke dalam iframe soal/login)
+window.addEventListener("blur", () => {
+  if (!isExamActive || isAuthorizedExit) return;
+
+  setTimeout(() => {
+    const activeEl = document.activeElement;
+    const examFrame = document.getElementById("examFrame");
+
+    // Jika siswa mengklik kolom login/jawaban di dalam iframe soal, JANGAN anggap pelanggaran
+    if (activeEl === examFrame || (activeEl && activeEl.tagName === "IFRAME")) {
+      return;
+    }
+
+    // Jika dokumen benar-benar kehilangan fokus ke jendela/aplikasi luar
+    if (!document.hasFocus()) {
+      tampilkanPelanggaran();
+    }
+  }, 150);
+});
+
+// 3. Deteksi jika siswa keluar dari mode layar penuh (Fullscreen)
 document.addEventListener("fullscreenchange", () => {
   if (isExamActive && !isAuthorizedExit && !document.fullscreenElement) {
-    bunyikanAlarm();
-    document.getElementById("violationOverlay").classList.remove("hidden");
+    tampilkanPelanggaran();
   }
 });
 
 document.getElementById("btnResumeFullscreen").addEventListener("click", async () => {
   document.getElementById("violationOverlay").classList.add("hidden");
   try {
-    await document.documentElement.requestFullscreen();
+    if (!document.fullscreenElement) {
+      await document.documentElement.requestFullscreen();
+    }
   } catch (_) {}
 });
